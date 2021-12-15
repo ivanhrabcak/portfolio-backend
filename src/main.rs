@@ -150,7 +150,7 @@ fn rocket() -> _ {
     // it's not meant to be used as a managed state
 
     let port: i32 = i32::from_str_radix(&env::var("PORT").unwrap(), 10).unwrap_or(8080);
-    let config = Config::figment().merge(("port", port));
+    let config = Config::figment().merge(("port", port)).merge(("address", "0.0.0.0"));
 
     println!("Running on port: {}", port);
 
