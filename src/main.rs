@@ -34,7 +34,6 @@ fn parse_timestamp(timestamp: String) -> Option<NaiveDateTime> {
     }
 
 }
-// hrabcak-eu-portfolio-backend
 
 async fn get_cached_repositories(github: &Github, username: String) -> Vec<Repository> {
     let repositories = JsonStorage::new(REPOSITORIES_STORAGE_FILENAME.to_string()).await.get_stored_data().await;
