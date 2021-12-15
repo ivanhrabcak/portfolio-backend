@@ -151,7 +151,9 @@ fn rocket() -> _ {
 
     let port: i32 = i32::from_str_radix(&env::var("PORT").unwrap(), 10).unwrap();
     let config = Config::figment().merge(("port", port));
-    
+
+    println!("Running on port: {}", port);
+
     rocket::custom(config)
             .attach(CORS)
             .manage(github)
