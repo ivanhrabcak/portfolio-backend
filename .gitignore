@@ -1,3 +1,4 @@
 /target
 .env
-storage.txt
+repositories.json
+user.json

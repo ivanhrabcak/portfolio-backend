@@ -2,18 +2,22 @@ use chrono::NaiveDateTime;
 use dotenv::dotenv;
 use github::{Credentials, Github};
 use rocket::{Config, State};
-use storage::TemporaryJsonStorage;
+use storage::JsonStorage;
 use std::env;
-use crate::{request::Response, github::Repository};
+use crate::{request::Response, github::Repository, cors::CORS};
 
 #[macro_use] extern crate rocket;
 
 pub mod github;
 pub mod storage;
 pub mod request;
+pub mod cors;
 
-const STORAGE_FILENAME: &str = "storage.txt";
+const REPOSITORIES_STORAGE_FILENAME: &str = "repositories.json";
+const USER_DATA_STORAGE_FILENAME: &str = "user.json";
 const USERNAME: &str = "ivanhrabcak"; 
+
+type Repositories = Vec<Repository>;
 
 fn parse_timestamp(timestamp: String) -> Option<NaiveDateTime> {
     let date_part = timestamp.split("T").nth(0).unwrap();
@@ -32,7 +36,7 @@ fn parse_timestamp(timestamp: String) -> Option<NaiveDateTime> {
 }
 
 async fn get_cached_repositories(github: &Github, username: String) -> Vec<Repository> {
-    let repositories = TemporaryJsonStorage::new(STORAGE_FILENAME.to_string()).await.get_repositories().await;
+    let repositories = JsonStorage::new(REPOSITORIES_STORAGE_FILENAME.to_string()).await.get_stored_data().await;
 
     if repositories.is_none() {
         let new_repositories = github.get_repositories(username).await;
@@ -44,7 +48,7 @@ async fn get_cached_repositories(github: &Github, username: String) -> Vec<Repos
         let new_repositories = new_repositories.unwrap();
 
         // we want to crash if this fails
-        TemporaryJsonStorage::new(STORAGE_FILENAME.to_string()).await.store(&new_repositories).await.unwrap();
+        JsonStorage::<Repositories>::new(REPOSITORIES_STORAGE_FILENAME.to_string()).await.store(&new_repositories).await.unwrap();
 
         return new_repositories;
     }
@@ -132,7 +136,6 @@ async fn get_n_of_stars(github: &State<Github>) -> Response<u32> {
     return Response::new(stars, 200);
 }
 
-
 #[launch]
 fn rocket() -> _ {
     dotenv().ok();
@@ -148,6 +151,7 @@ fn rocket() -> _ {
     
     let config = Config::figment().merge(("port", 8080));
     rocket::custom(config)
+            .attach(CORS)
             .manage(github)
             .mount("/", routes![get_repositories, get_n_starred_repository, get_n_last_pushed_repository, get_n_largest_repository, get_n_of_stars])
 }            

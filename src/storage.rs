@@ -1,40 +1,25 @@
-use std::time::SystemTime;
+use std::{time::SystemTime, marker::PhantomData};
 
+use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
 
 use crate::github::Repository;
 
 
-pub struct TemporaryJsonStorage {
+pub struct JsonStorage<'a, T> where T: Serialize + Deserialize<'a>  {
     filename: String,
-    repositories: Vec<Repository>
+
+    // lifetime and type parameter are actually used!
+    _data: &'a PhantomData<T>,
+    
+    // to bypass lifetime checks (:D)
+    contents: Box<&'a str>,
+    content: String 
 }
 
-impl TemporaryJsonStorage {
-    pub async fn new(filename: String) -> Self {
-        let contents = tokio::fs::read(&filename).await.unwrap_or(Vec::new());
-
-        if contents.len() == 0 {
-            let file = File::create(&filename).await;
-
-            // if the file cannot be created we want to panic - we have nothing else to do
-            file.unwrap();
-
-            TemporaryJsonStorage { filename, repositories: Vec::new() }
-        }
-        else {
-            let contents = std::str::from_utf8(contents.as_slice()).unwrap_or("");
-
-            if contents == "" {
-                TemporaryJsonStorage { filename, repositories: Vec::new() }
-            }
-            else {
-                match serde_json::from_str(contents) {
-                    Ok(repositories) => TemporaryJsonStorage { filename, repositories },
-                    Err(_) => TemporaryJsonStorage { filename, repositories: Vec::new() }
-                }
-            }
-        }
+impl<'a, T> JsonStorage<'a, T> where T: 'a + Serialize + Deserialize<'a> {
+    pub async fn new(filename: String) -> JsonStorage<'a, T> {
+        JsonStorage { filename, _data: &PhantomData, contents: Box::new(""), content: "".to_string() }
     }
 
     pub async fn store(self, data: &Vec<Repository>) -> Result<(), ()> {
@@ -64,7 +49,42 @@ impl TemporaryJsonStorage {
         Ok(())
     } 
 
-    pub async fn get_repositories(self) -> Option<Vec<Repository>> {
+    unsafe fn u8_vec_to_str(&self, v: Vec<u8>) -> String {
+        return std::str::from_utf8_unchecked(v.as_slice()).to_string()
+    }
+
+    async unsafe fn read_data(&'a mut self) -> Option<T> {
+        let contents = tokio::fs::read(&self.filename).await;
+
+        if contents.is_err() {
+            return None
+        }
+
+        let contents: Vec<u8> = contents.unwrap();
+
+        if contents.len() == 0 {
+            return None
+        }
+        else {
+            self.content = self.u8_vec_to_str(contents);
+            self.contents = Box::new(&self.content);
+
+            if *self.contents == "" {
+                return None;
+            }
+
+            let deserialized = serde_json::from_str(*self.contents);
+            if let Ok(data) = deserialized {
+                data
+            } else {
+                None
+            }
+        }
+
+
+    }
+
+    pub async fn get_stored_data(&'a mut self) -> Option<T> {
         let file = File::open(&self.filename).await;
 
         if file.is_err() {
@@ -86,11 +106,12 @@ impl TemporaryJsonStorage {
                 let duration_since_modified = SystemTime::now().duration_since(modified).unwrap();
 
                 if duration_since_modified.as_secs() < 60 * 60 { // each hour
-                    if self.repositories.len() == 0 {
+                    let data = unsafe { self.read_data().await };
+                    if data.is_none() {
                         None
                     }
                     else {
-                        Some(self.repositories.to_vec())
+                        Some(data.unwrap())
                     }
                 }
                 else {
