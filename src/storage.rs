@@ -3,8 +3,6 @@ use std::{time::SystemTime, marker::PhantomData};
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::github::Repository;
-
 
 pub struct JsonStorage<'a, T> where T: Serialize + Deserialize<'a>  {
     filename: String,
@@ -22,7 +20,7 @@ impl<'a, T> JsonStorage<'a, T> where T: 'a + Serialize + Deserialize<'a> {
         JsonStorage { filename, _data: &PhantomData, contents: Box::new(""), content: "".to_string() }
     }
 
-    pub async fn store(self, data: &Vec<Repository>) -> Result<(), ()> {
+    pub async fn store(self, data: &T) -> Result<(), ()> {
         let serialized = serde_json::to_string(data);
 
         

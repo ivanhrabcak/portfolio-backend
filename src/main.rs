@@ -1,16 +1,17 @@
 use chrono::NaiveDateTime;
 use dotenv::dotenv;
-use github::{Credentials, Github};
+use github::{Credentials, Github, User};
 use rocket::{Config, State};
+use serde::{Deserialize, Serialize};
 use storage::JsonStorage;
 use std::env;
-use crate::{request::Response, github::Repository, cors::CORS};
+use crate::{response::Response, github::Repository, cors::CORS};
 
 #[macro_use] extern crate rocket;
 
 pub mod github;
 pub mod storage;
-pub mod request;
+pub mod response;
 pub mod cors;
 
 const REPOSITORIES_STORAGE_FILENAME: &str = "repositories.json";
@@ -54,6 +55,27 @@ async fn get_cached_repositories(github: &Github, username: String) -> Vec<Repos
     }
 
     repositories.unwrap()
+}
+
+async fn get_cached_user(github: &Github, username: String) -> Option<User> {
+    let user = JsonStorage::<User>::new(USER_DATA_STORAGE_FILENAME.to_string()).await
+                    .get_stored_data().await;
+    
+    if user.is_none() {
+        let new_user = github.get_user(username).await;
+        
+        if new_user.is_err() {
+            return None;
+        }
+
+        let new_user = new_user.unwrap();
+
+        JsonStorage::<User>::new(USER_DATA_STORAGE_FILENAME.to_string()).await.store(&new_user).await.unwrap();
+
+        return Some(new_user);
+    }
+
+    Some(user.unwrap())
 }
 
 #[get("/repositories")]
@@ -136,6 +158,33 @@ async fn get_n_of_stars(github: &State<Github>) -> Response<u32> {
     return Response::new(stars, 200);
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct UserInformation {
+    login: String,
+    avatar_url: String,
+    email: String,
+    followers: u32,
+    repository_count: u32
+}
+
+#[get("/info")]
+async fn get_contact_information(github: &State<Github>) -> Response<Option<UserInformation>> {
+    let user = get_cached_user(github, USERNAME.to_string()).await;
+
+    if user.is_none() {
+        return Response::new(None, 500);
+    }
+
+    let user = user.unwrap();
+    let contact_information = UserInformation { login: user.login, 
+                                                                    avatar_url: user.avatar_url,
+                                                                    email: user.email.unwrap(),
+                                                                    followers: user.followers.unwrap(),
+                                                                    repository_count: user.total_private_repos.unwrap() };
+
+    Response::new(Some(contact_information), 200)
+}
+
 #[launch]
 fn rocket() -> _ {
     dotenv().ok();
@@ -149,7 +198,7 @@ fn rocket() -> _ {
     // we do not need to create a TemporaryJsonStorage state, as each of its method consumes the object
     // it's not meant to be used as a managed state
 
-    let port: i32 = i32::from_str_radix(&env::var("PORT").unwrap(), 10).unwrap_or(8080);
+    let port: i32 = i32::from_str_radix(&env::var("PORT").unwrap_or("8081".to_string()), 10).unwrap();
     let config = Config::figment().merge(("port", port)).merge(("address", "0.0.0.0"));
 
     println!("Running on port: {}", port);
@@ -157,5 +206,6 @@ fn rocket() -> _ {
     rocket::custom(config)
             .attach(CORS)
             .manage(github)
-            .mount("/", routes![get_repositories, get_n_starred_repository, get_n_last_pushed_repository, get_n_largest_repository, get_n_of_stars])
+            .mount("/", routes![get_repositories, get_n_starred_repository, get_n_last_pushed_repository, 
+                                            get_n_largest_repository, get_n_of_stars, get_contact_information])
 }            
